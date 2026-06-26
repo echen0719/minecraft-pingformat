@@ -5,5 +5,5 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-masscan 0.0.0.0-255.255.255.255 -p 25565 --rate 25000000 --exclude 255.255.255.255 -oJ output.json
+masscan 0.0.0.0-255.255.255.255 -p 25565 --rate $1 --exclude 255.255.255.255 -oJ output.json
 rm paused.conf
