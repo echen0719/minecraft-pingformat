@@ -62,6 +62,9 @@ async def readPacket(reader):
     return await reader.readexactly(length) # make sure entire message is read
 
 async def ping(host, port, timeout=5):
+    writer = None
+    reader = None
+
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
 
@@ -98,13 +101,20 @@ async def ping(host, port, timeout=5):
             "favicon": data.get("favicon"),
         }
 
-    except Exception:
+    except Exception as e:
         return {"online": False}
 
     finally:
-        if writer:
-            writer.close()
-            await writer.wait_closed()
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except ConnectionResetError:
+                print(host + ":" + str(port) + " is offline or is not a Minecraft IP")
+                pass
+            except Exception as e:
+                print(e)
+                pass
 
 async def worker(server, semaphore):
     async with semaphore:
@@ -114,7 +124,9 @@ async def worker(server, semaphore):
 
 async def main():
     servers = [
-        ("play.hypixel.net", 25565)
+        ("161.118.151.108", 25565),
+        ("161.118.239.95", 25565),
+        ("161.115.162.126", 25565)
     ]
 
     semaphore = asyncio.Semaphore(2000)
