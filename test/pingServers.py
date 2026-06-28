@@ -61,84 +61,103 @@ async def readPacket(reader):
     length = await decodeReader(reader)
     return await reader.readexactly(length) # make sure entire message is read
 
-async def ping(host, port, timeout=5):
-    writer = None
-    reader = None
+async def ping(host, port, timeout=5, retries=10):
+    for attempt in range(retries):
+        writer = None
+        reader = None
 
-    try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
 
-        protocol = 67 # could be anything, lol
-        bites = host.encode()
+            protocol = 67 # could be anything, lol
+            bites = host.encode()
 
-        # turns out, this is like a request paylod for 0x00 with protocol, length, payload, port (in 2-byte)
-        handshake = (encode(0) + encode(protocol & 0xFFFFFFFF) + encode(len(bites)) + bites + struct.pack(">H", port) + encode(1))
+            # turns out, this is like a request paylod for 0x00 with protocol, length, payload, port (in 2-byte)
+            handshake = (encode(0) + encode(protocol & 0xFFFFFFFF) + encode(len(bites)) + bites + struct.pack(">H", port) + encode(1))
 
-        # packets are (VarInt length, packet data)
-        writer.write(encode(len(handshake)) + handshake)
-        writer.write(b"\x01\x00")
-        await writer.drain()
+            # packets are (VarInt length, packet data)
+            writer.write(encode(len(handshake)) + handshake)
+            writer.write(b"\x01\x00")
+            await writer.drain()
 
-        packet = await asyncio.wait_for(readPacket(reader), timeout)
+            packet = await asyncio.wait_for(readPacket(reader), timeout)
 
-        packet_id = packet[0]
-        if packet_id != 0:
-            raise RuntimeError("Unexpected packet id")
+            packet_id = packet[0]
+            if packet_id != 0:
+                raise RuntimeError("Unexpected packet id")
 
-        i = 1
-        length, i = decode(packet, i)
+            i = 1
+            length, i = decode(packet, i)
 
-        response = packet[i:i + length].decode("utf-8")
-        data = json.loads(response)
+            response = packet[i:i + length].decode("utf-8")
+            data = json.loads(response)
 
-        return {
-            "online": True,
-            "motd": data.get("description"),
-            "version": data.get("version", {}).get("name"),
-            "protocol": data.get("version", {}).get("protocol"),
-            "players_online": data.get("players", {}).get("online"),
-            "players_max": data.get("players", {}).get("max"),
-            "favicon": data.get("favicon"),
-        }
+            return {
+                "online": True,
+                "motd": data.get("description"),
+                "version": data.get("version", {}).get("name"),
+                "protocol": data.get("version", {}).get("protocol"),
+                "players_online": data.get("players", {}).get("online"),
+                "players_max": data.get("players", {}).get("max"),
+                # "favicon": data.get("favicon"),
+            }
 
-    except Exception as e:
-        return {"online": False}
+        except Exception as e:
+            return {"online": False}
 
-    finally:
-        if writer is not None:
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except ConnectionResetError:
-                print(host + ":" + str(port) + " is offline or is not a Minecraft IP")
-                pass
-            except Exception as e:
-                print(e)
-                pass
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except ConnectionResetError:
+                    print(host + ":" + str(port) + " is offline or is not a Minecraft IP")
+                    pass
+                except Exception as e:
+                    print(e)
+                    pass
 
 async def worker(server, semaphore):
     async with semaphore:
-        host, port = server
+        host = server["ip"]
+        port = server["port"]
         result = await ping(host, port)
-        return result
+        if result["online"]:
+            return result
 
 async def main():
-    servers = [
-        ("161.118.151.108", 25565),
-        ("161.118.239.95", 25565),
-        ("161.115.162.126", 25565)
-    ]
+    with open("cleaned.json", "r") as infile:
+        servers = json.load(infile)
 
-    semaphore = asyncio.Semaphore(2000)
+    semaphore = asyncio.Semaphore(100)
 
     tasks = [
         asyncio.create_task(worker(server, semaphore))
         for server in servers
     ]
 
-    results = await asyncio.gather(*tasks)
+    results = []
 
-    print(json.dumps(results, indent=4, ensure_ascii=False))
+    with open("info.json", "w") as outfile:
+        outfile.write("[")
+        first = True
+
+        for i, task in enumerate(asyncio.as_completed(tasks), 1):
+            result = await task
+            if result is None:
+                continue
+            results.append(result)
+
+            if not first:
+                outfile.write(",\n")
+            outfile.write(json.dumps(result))
+
+            first = False
+
+            if i % 1000 == 0:
+                outfile.flush()
+
+        outfile.write("]")
 
 if __name__ == "__main__":
     asyncio.run(main())
