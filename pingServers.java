@@ -99,6 +99,7 @@ public class pingServers {
 
             try {
                 socket.connect(new InetSocketAddress(host, port), timeout);
+                socket.setSoTimeout(timeout);
 
                 InputStream reader = socket.getInputStream();
                 OutputStream writer = socket.getOutputStream();
