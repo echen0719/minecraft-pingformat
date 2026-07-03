@@ -1,8 +1,7 @@
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.JsonElement;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -18,7 +17,6 @@ import java.util.concurrent.Future;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public class pingServers {
@@ -27,7 +25,7 @@ public class pingServers {
 
         while (true) {
             int b = value & 0x7F;
-            value = value >> 7;
+            value = value >>> 7;
 
             if (value == 0) {
                 result.write(b);
@@ -47,28 +45,6 @@ public class pingServers {
             this.value = value;
             this.index = index;
         }
-    }
-
-    public static Decoded decode(byte[] data, int i) throws IOException {
-        int result = 0;
-        int shift = 0;
-
-        while (true) {
-            int b = data[i];
-            i++;
-            result |= (b & 0x7F) << shift;
-
-            if ((b & 0x80) == 0) {
-                break;
-            }
-
-            shift += 7;
-            if (shift > 35) {
-                throw new IOException("VarInt too large");
-            }
-        }
-
-        return new Decoded(result, i);
     }
 
     public static int decodeReader(InputStream socket) throws IOException {
@@ -122,14 +98,13 @@ public class pingServers {
             Socket socket = new Socket();
 
             try {
-                socket.connect(new InetSocketAddress(host, port));
-                socket.setSoTimeout(timeout);
+                socket.connect(new InetSocketAddress(host, port), timeout);
 
                 InputStream reader = socket.getInputStream();
                 OutputStream writer = socket.getOutputStream();
 
-                int protocol = 67;
-                byte[] bites = host.getBytes(StandardCharsets.UTF_8); // string -?> byte[]
+                int protocol = -1;
+                byte[] bites = host.getBytes(StandardCharsets.UTF_8); // string -> byte[]
 
                 ByteArrayOutputStream handshakeStream = new ByteArrayOutputStream();
 
@@ -137,7 +112,8 @@ public class pingServers {
                 handshakeStream.write(encode(protocol));
                 handshakeStream.write(encode(bites.length));
                 handshakeStream.write(bites);
-                handshakeStream.write(ByteBuffer.allocate(2).putShort((short) port).array()); // struct.pack(">H", port) equivalent in Java
+                handshakeStream.write((port >> 8) & 0xFF); // struct.pack(">H", port) equivalent in Java
+                handshakeStream.write(port & 0xFF);
                 handshakeStream.write(encode(1));
 
                 byte[] handshake = handshakeStream.toByteArray();
@@ -148,21 +124,20 @@ public class pingServers {
                 writer.flush();
 
                 byte[] packet = readPacket(reader);
-                int packetID = packet[0];
+                ByteArrayInputStream packetStream = new ByteArrayInputStream(packet);
 
-                if (packetID != 0) {
+                if (packetStream.read() != 0) {
                     throw new IOException("Unexpected packet id");
                 }
 
-                Decoded info = decode(packet, 1);
-                int length = info.value;
-                int index = info.index;
+                int jsonLength = decodeReader(packetStream);
+                byte[] jsonBytes = new byte[jsonLength];
+                packetStream.read(jsonBytes);
 
-                String response = new String(packet, index, length, StandardCharsets.UTF_8);
-
+                String response = new String(jsonBytes, StandardCharsets.UTF_8);
                 JsonObject data = JsonParser.parseString(response).getAsJsonObject();
-                JsonObject result = new JsonObject();
 
+                JsonObject result = new JsonObject();
                 result.addProperty("host", host);
                 result.addProperty("port", port);
                 result.addProperty("online", true);
@@ -170,11 +145,7 @@ public class pingServers {
                 // https://minecraft.wiki/w/Java_Edition_protocol/Server_List_Ping
                 // reading docs be like...
                 if (data.has("description")) {
-                    JsonObject description = data.getAsJsonObject("description");
-
-                    if (description.has("text")) {
-                        result.addProperty("motd", description.get("text").getAsString());
-                    }
+                    result.add("motd", data.get("description"));
                 }
                 if (data.has("version") && data.get("version").isJsonObject()) {
                     JsonObject version = data.getAsJsonObject("version");
@@ -191,19 +162,22 @@ public class pingServers {
                     JsonObject players = data.getAsJsonObject("players");
 
                     if (players.has("online")) {
-                        result.addProperty("online", players.get("online").getAsInt());
+                        result.addProperty("online_players", players.get("online").getAsInt());
                     }
 
                     if (players.has("max")) {
-                        result.addProperty("max", players.get("max").getAsInt());
+                        result.addProperty("max_players", players.get("max").getAsInt());
                     }
+                }
+                if (data.has("favicon") && data.get("favicon").isJsonPrimitive()) {
+                    result.addProperty("icon", data.get("favicon").getAsString());
                 }
 
                 return result;
             }
 
             catch (Exception e) {
-                System.out.println("Failed. Trying attempt (" + (attempt + 1) + "/" + retries + ") for host " + host + ":" + port + "...");
+                // System.out.println("Failed. Trying attempt (" + (attempt + 1) + "/" + retries + ") for host " + host + ":" + port + "...");
             }
 
             finally {
@@ -239,6 +213,7 @@ public class pingServers {
         List<Future<JsonObject>> promises = new ArrayList<>(); // promises like in JS
 
         List<ServerInfo> servers = new ArrayList<>(List.of(
+            new ServerInfo("mc.hypixel.net", 25565),
             new ServerInfo("195.133.139.214", 25565),
             new ServerInfo("172.65.197.160", 25565),
             new ServerInfo("174.97.36.50", 25565),
@@ -247,7 +222,7 @@ public class pingServers {
         ));
 
         for (ServerInfo server : servers) {
-            Future<JsonObject> promise = executor.submit(() -> ping(server.host, server.port, 5000, 3));
+            Future<JsonObject> promise = executor.submit(() -> ping(server.host, server.port, 5000, 10));
             promises.add(promise);
         }
 
