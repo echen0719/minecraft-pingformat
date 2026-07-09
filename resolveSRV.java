@@ -1,3 +1,16 @@
+import java.net.InetSocketAddress;
+
+import javax.naming.Context;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.DirContext;
+import javax.naming.directory.InitialDirContext;
+import javax.naming.NamingEnumeration;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Hashtable;
+import java.util.Comparator;
+
 public class resolveSRV {
 // just copied this https://stackoverflow.com/questions/78165993
     public static InetSocketAddress resolveSRV(String host, int port) {
