@@ -47,7 +47,10 @@ async def scanJava(address):
 
         return {
             "online": True,
-            "motd": status.motd,
+            "motd": {
+                "html": status.motd.to_html(),
+                "clean": status.motd.to_plain()
+            },
             "version": status.version.name,
             "protocol": status.version.protocol,
             "players": {
@@ -55,7 +58,7 @@ async def scanJava(address):
                 "max": status.players.max
             },
             "playersList": status.players.sample,
-            "favicon": status.icon,
+            "icon": status.icon,
         }
 
     except Exception as e:
@@ -69,14 +72,17 @@ async def scanLegacy(address):
 
         return {
             "online": True,
-            "motd": status.motd,
+            "motd": {
+                "html": status.motd.to_html(),
+                "clean": status.motd.to_plain()
+            },
             "version": status.version.name,
             "protocol": status.version.protocol,
             "players": {
                 "online": status.players.online,
                 "max": status.players.max
             },
-            "favicon": "",
+            "icon": "",
         }
     except Exception as e:
         print("LegacyServer error:", repr(e))
